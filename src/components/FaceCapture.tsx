@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { detectFace } from '../avatar';
+import { detectFace, generatePixelAvatarFromFeatures } from '../avatar';
 import { generateSeedreamPixelAvatar } from '../api';
 import type { FaceFeatures } from '../types';
 
@@ -8,6 +8,7 @@ type GenerationStage = 'idle' | 'extracting' | 'generating' | 'done';
 interface FaceCaptureState {
   referenceUrl: string | null;
   seedreamUrl: string | null;
+  localAvatarUrl: string | null;
   features: FaceFeatures | null;
   stage: GenerationStage;
   error: string | null;
@@ -17,6 +18,7 @@ export function FaceCapture(): React.JSX.Element {
   const [state, setState] = useState<FaceCaptureState>({
     referenceUrl: null,
     seedreamUrl: null,
+    localAvatarUrl: null,
     features: null,
     stage: 'idle',
     error: null,
@@ -51,6 +53,7 @@ export function FaceCapture(): React.JSX.Element {
     setState({
       referenceUrl,
       seedreamUrl: null,
+      localAvatarUrl: null,
       features: null,
       stage: 'extracting',
       error: null,
@@ -65,9 +68,13 @@ export function FaceCapture(): React.JSX.Element {
         throw new Error('Feature extraction returned empty result.');
       }
 
+      const localCanvas = generatePixelAvatarFromFeatures(features, 128);
+      const localAvatarUrl = localCanvas.toDataURL('image/png');
+
       setState((prev) => ({
         ...prev,
         features,
+        localAvatarUrl,
         stage: 'generating',
       }));
 
@@ -111,6 +118,7 @@ export function FaceCapture(): React.JSX.Element {
       <div style={styles.previewGrid}>
         <PreviewSlot title="REF" imageUrl={state.referenceUrl} />
         <PreviewSlot title="SEEDREAM" imageUrl={state.seedreamUrl} loading={state.stage === 'generating'} />
+        <PreviewSlot title="LOCAL" imageUrl={state.localAvatarUrl} compact />
       </div>
 
       {featureTags.length > 0 && (
@@ -140,17 +148,19 @@ function PreviewSlot({
   title,
   imageUrl,
   loading = false,
+  compact = false,
 }: {
   title: string;
   imageUrl: string | null;
   loading?: boolean;
+  compact?: boolean;
 }): React.JSX.Element {
   return (
-    <div style={styles.previewSlot}>
+    <div style={compact ? styles.previewSlotSmall : styles.previewSlot}>
       <span style={styles.slotTitle}>{title}</span>
       <div style={styles.imageStage}>
         {imageUrl ? (
-          <img src={imageUrl} alt={title} style={styles.resultImage} />
+          <img src={imageUrl} alt={title} style={compact ? styles.localImage : styles.resultImage} />
         ) : (
           <span style={styles.emptyText}>{loading ? '...' : '--'}</span>
         )}
@@ -248,6 +258,16 @@ const styles: Record<string, React.CSSProperties> = {
     background: mint,
     boxShadow: `3px 3px 0 ${ink}`,
   },
+  previewSlotSmall: {
+    minHeight: 230,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    padding: 8,
+    border: `2px solid ${ink}`,
+    background: '#E7FFF8',
+    boxShadow: `3px 3px 0 ${ink}`,
+  },
   slotTitle: {
     minHeight: 20,
     fontFamily: '"Press Start 2P", ui-monospace, monospace',
@@ -266,6 +286,12 @@ const styles: Record<string, React.CSSProperties> = {
   resultImage: {
     width: '100%',
     height: '100%',
+    objectFit: 'contain',
+    imageRendering: 'pixelated',
+  },
+  localImage: {
+    width: 128,
+    height: 128,
     objectFit: 'contain',
     imageRendering: 'pixelated',
   },
