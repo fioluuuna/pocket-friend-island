@@ -1,78 +1,112 @@
 /**
- * @module feature-extractor
- * @description 从 MediaPipe Face Mesh 468 关键点中提取 FaceFeatures。
- * 根据面部关键点的位置比例推算脸型、眼大小、肤色、发色等特征。
+ * Extracts deterministic avatar features from MediaPipe Face Mesh landmarks and
+ * optional image pixels. Every fallback is explicit and carried back to the UI.
  */
 
 import type {
+  EyeSize,
   FaceFeatures,
   FaceShape,
-  EyeSize,
-  SkinTone,
+  FeatureDetectionWarning,
+  HairColorName,
   HairStyle,
+  SkinTone,
 } from '../types';
-import { SKIN_PALETTES, closestSkinTone, getHairColorName } from './pixel-palettes';
+import { closestSkinTone, getHairColorName, HAIR_PALETTES, SHIRT_COLORS, SKIN_PALETTES } from './pixel-palettes';
 
-/** MediaPipe Face Mesh 单个关键点 */
-type Landmark = { x: number; y: number; z: number };
+export type Landmark = { x: number; y: number; z: number };
 
-/**
- * 从 MediaPipe Face Mesh 468 个关键点中提取 FaceFeatures。
- * @param landmarks - 468 个面部关键点数组，坐标为归一化值 (0-1)
- * @param imageWidth - 原始图像宽度
- * @param imageHeight - 原始图像高度
- * @param imageData - 可选的 ImageData，用于采样肤色和发色像素
- * @returns 提取出的 FaceFeatures 对象
- */
+const DEFAULT_SKIN_RGB: [number, number, number] = SKIN_PALETTES.light.rgb;
+const DEFAULT_HAIR_RGB: [number, number, number] = [93, 64, 55];
+const DEFAULT_FEATURES: FaceFeatures = {
+  shape: 'oval',
+  eyeSize: 'medium',
+  skinTone: 'light',
+  hairStyle: 'short',
+  hasGlasses: false,
+  hasBeard: false,
+  hasMakeup: false,
+  genderPresentation: {
+    hasBeard: false,
+    hasMakeup: false,
+    hasGlasses: false,
+  },
+  eyeDistance: 0.5,
+  skinRGB: DEFAULT_SKIN_RGB,
+  hairRGB: DEFAULT_HAIR_RGB,
+  hairColor: 'brown',
+  shirtColor: SHIRT_COLORS[5],
+  usedFallback: true,
+  warnings: [],
+};
+
+/** Explicit deterministic defaults for no-face/no-pixel fallback paths. */
+export function getDefaultFaceFeatures(message = '未能可靠提取照片特征，已使用固定默认像素小人。'): FaceFeatures {
+  return {
+    ...DEFAULT_FEATURES,
+    genderPresentation: { ...DEFAULT_FEATURES.genderPresentation! },
+    warnings: [{ field: 'image', message }],
+  };
+}
+
 export function extractFeaturesFromLandmarks(
   landmarks: Array<Landmark>,
   imageWidth: number,
   imageHeight: number,
   imageData?: ImageData,
 ): FaceFeatures {
-  // 1. 脸型判断
-  const faceShape = detectFaceShape(landmarks);
+  const warnings: FeatureDetectionWarning[] = [];
 
-  // 2. 眼睛大小判断
+  if (!hasRequiredLandmarks(landmarks)) {
+    return getDefaultFaceFeatures('人脸关键点不完整，已使用固定默认特征。');
+  }
+
+  const shape = detectFaceShape(landmarks);
   const eyeSize = detectEyeSize(landmarks);
-
-  // 3. 眼间距
   const eyeDistance = detectEyeDistance(landmarks);
 
-  // 4. 肤色
-  const { skinTone, skinRGB } = detectSkinTone(landmarks, imageWidth, imageHeight, imageData);
+  const skinResult = detectSkinTone(landmarks, imageWidth, imageHeight, imageData);
+  warnings.push(...skinResult.warnings);
 
-  // 5. 发色
-  const hairColor = detectHairColor(landmarks, imageWidth, imageHeight, imageData, skinRGB);
+  const hairResult = detectHairColor(landmarks, imageWidth, imageHeight, imageData, skinResult.skinRGB);
+  warnings.push(...hairResult.warnings);
 
-  // 6. 发型（MVP 阶段不自动检测，默认短发）
-  const hairStyle: HairStyle = 'short';
-
-  // 7. 眼镜检测
-  const hasGlasses = detectGlasses(landmarks);
-
-  // 8. 胡须检测（MVP 阶段默认无）
-  const hasBeard = false;
+  const hasGlasses = detectGlasses(landmarks, imageWidth, imageHeight, imageData);
+  const hasBeard = detectBeard(landmarks, imageWidth, imageHeight, imageData, skinResult.skinRGB);
+  const hasMakeup = detectMakeup(landmarks, imageWidth, imageHeight, imageData, skinResult.skinRGB);
+  const hairStyle = detectHairStyle(landmarks, imageWidth, imageHeight, imageData, hairResult.hairColor);
 
   return {
-    shape: faceShape,
+    shape,
     eyeSize,
-    eyeDistance,
-    skinTone,
-    skinRGB,
+    skinTone: skinResult.skinTone,
+    hairStyle,
     hasGlasses,
     hasBeard,
-    hairStyle,
-    hairColor,
+    hasMakeup,
+    genderPresentation: {
+      hasBeard,
+      hasMakeup,
+      hasGlasses,
+    },
+    eyeDistance,
+    skinRGB: skinResult.skinRGB,
+    hairRGB: hairResult.hairRGB,
+    hairColor: hairResult.hairColor,
+    shirtColor: deterministicShirtColor({
+      shape,
+      eyeSize,
+      skinTone: skinResult.skinTone,
+      hairColor: hairResult.hairColor,
+      hasGlasses,
+      hasBeard,
+      hasMakeup,
+    }),
+    usedFallback: warnings.length > 0,
+    warnings,
   };
 }
 
-/**
- * 计算两个 RGB 颜色之间的欧氏距离。
- * @param a - 第一个颜色 [r, g, b]
- * @param b - 第二个颜色 [r, g, b]
- * @returns 欧氏距离值
- */
 export function euclideanDistance(
   a: [number, number, number],
   b: [number, number, number],
@@ -83,12 +117,6 @@ export function euclideanDistance(
   return Math.sqrt(dr * dr + dg * dg + db * db);
 }
 
-/**
- * 计算两个关键点之间的像素距离。
- * @param a - 第一个关键点
- * @param b - 第二个关键点
- * @returns 欧氏距离（归一化坐标）
- */
 export function getLandmarkDistance(
   a: { x: number; y: number },
   b: { x: number; y: number },
@@ -98,14 +126,6 @@ export function getLandmarkDistance(
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-/**
- * 从 ImageData 中采样指定坐标处的像素颜色。
- * @param imageData - 图像像素数据
- * @param x - 像素 X 坐标
- * @param y - 像素 Y 坐标
- * @param width - 图像宽度
- * @returns RGB 数组 [r, g, b]
- */
 export function samplePixelColor(
   imageData: ImageData,
   x: number,
@@ -123,177 +143,317 @@ export function samplePixelColor(
   ];
 }
 
-/**
- * 检测脸型：根据面部宽高比判断。
- * landmark 454 = 右侧脸边缘, 234 = 左侧脸边缘
- * landmark 152 = 下巴底, 10 = 额头顶
- */
-function detectFaceShape(landmarks: Array<Landmark>): FaceShape {
-  const faceWidth = getLandmarkDistance(landmarks[454], landmarks[234]);
-  const faceHeight = getLandmarkDistance(landmarks[152], landmarks[10]);
-  const ratio = faceWidth / faceHeight;
-
-  if (ratio > 0.85) {
-    return 'round';
-  } else if (ratio >= 0.7) {
-    return 'oval';
-  } else {
-    return 'long';
-  }
+function hasRequiredLandmarks(landmarks: Array<Landmark>): boolean {
+  return landmarks.length > 454 && [10, 33, 61, 133, 152, 168, 172, 199, 234, 263, 291, 362, 397, 454].every((idx) => Boolean(landmarks[idx]));
 }
 
-/**
- * 检测眼睛大小：根据眼宽与脸宽的比例判断。
- * landmark 33 = 左眼外角, 133 = 左眼内角
- * landmark 263 = 右眼外角, 362 = 右眼内角
- */
+function detectFaceShape(landmarks: Array<Landmark>): FaceShape {
+  const cheekWidth = getLandmarkDistance(landmarks[454], landmarks[234]);
+  const jawWidth = getLandmarkDistance(landmarks[397], landmarks[172]);
+  const faceHeight = getLandmarkDistance(landmarks[152], landmarks[10]);
+  const widthHeightRatio = cheekWidth / Math.max(faceHeight, 0.001);
+  const jawRatio = jawWidth / Math.max(cheekWidth, 0.001);
+
+  if (jawRatio > 0.82 && widthHeightRatio > 0.68) return 'square';
+  if (widthHeightRatio >= 0.82) return 'round';
+  if (widthHeightRatio < 0.64) return 'long';
+  return 'oval';
+}
+
 function detectEyeSize(landmarks: Array<Landmark>): EyeSize {
   const faceWidth = getLandmarkDistance(landmarks[454], landmarks[234]);
   const leftEyeWidth = getLandmarkDistance(landmarks[33], landmarks[133]);
   const rightEyeWidth = getLandmarkDistance(landmarks[362], landmarks[263]);
-  const avgEyeWidth = (leftEyeWidth + rightEyeWidth) / 2;
-  const ratio = avgEyeWidth / faceWidth;
+  const ratio = ((leftEyeWidth + rightEyeWidth) / 2) / Math.max(faceWidth, 0.001);
 
-  if (ratio > 0.35) {
-    return 'big';
-  } else if (ratio >= 0.25) {
-    return 'medium';
-  } else {
-    return 'small';
-  }
+  if (ratio >= 0.24) return 'big';
+  if (ratio >= 0.18) return 'medium';
+  return 'small';
 }
 
-/**
- * 检测眼间距：归一化到 0-1 范围。
- * landmark 33 = 左眼外角, 362 = 右眼外角
- */
 function detectEyeDistance(landmarks: Array<Landmark>): number {
   const faceWidth = getLandmarkDistance(landmarks[454], landmarks[234]);
-  const innerEyeDistance = Math.abs(landmarks[33].x - landmarks[362].x);
-
-  // 归一化：将原始比例映射到 0-1
-  const rawRatio = innerEyeDistance / faceWidth;
-  // 通常内眼距/脸宽约 0.3-0.7，映射到 0-1
-  return Math.max(0, Math.min(1, (rawRatio - 0.3) / 0.4));
+  const innerDistance = getLandmarkDistance(landmarks[133], landmarks[362]);
+  const rawRatio = innerDistance / Math.max(faceWidth, 0.001);
+  return clamp((rawRatio - 0.24) / 0.28, 0, 1);
 }
 
-/**
- * 检测肤色：从脸颊区域（landmark 116, 345 附近）采样像素颜色。
- */
 function detectSkinTone(
   landmarks: Array<Landmark>,
   imageWidth: number,
   imageHeight: number,
   imageData?: ImageData,
-): { skinTone: SkinTone; skinRGB: [number, number, number] } {
-  const defaultRGB: [number, number, number] = [198, 134, 66]; // medium
-
+): { skinTone: SkinTone; skinRGB: [number, number, number]; warnings: FeatureDetectionWarning[] } {
   if (!imageData) {
-    return { skinTone: 'medium', skinRGB: defaultRGB };
+    return {
+      skinTone: 'light',
+      skinRGB: DEFAULT_SKIN_RGB,
+      warnings: [{ field: 'skinTone', message: '未读取到照片像素，肤色使用固定默认值。' }],
+    };
   }
 
-  // 在脸颊区域采样多个点取平均值
-  const cheekLandmarks = [
-    landmarks[116],  // 左脸颊
-    landmarks[345],  // 右脸颊
-    landmarks[234],  // 左侧脸
-    landmarks[454],  // 右侧脸
-  ];
+  const samples = sampleLandmarkCluster(imageData, imageWidth, imageHeight, landmarks, [
+    { idx: 50, dx: 0, dy: 0 },
+    { idx: 101, dx: 0, dy: 0 },
+    { idx: 205, dx: 0, dy: 0 },
+    { idx: 425, dx: 0, dy: 0 },
+    { idx: 280, dx: 0, dy: 0 },
+    { idx: 199, dx: 0, dy: 0 },
+  ]).filter(isLikelySkinPixel);
 
-  let totalR = 0;
-  let totalG = 0;
-  let totalB = 0;
-  let count = 0;
-
-  for (const lm of cheekLandmarks) {
-    const px = Math.round(lm.x * imageWidth);
-    const py = Math.round(lm.y * imageHeight);
-    const color = samplePixelColor(imageData, px, py, imageWidth);
-    totalR += color[0];
-    totalG += color[1];
-    totalB += color[2];
-    count++;
+  if (samples.length < 3) {
+    return {
+      skinTone: 'light',
+      skinRGB: DEFAULT_SKIN_RGB,
+      warnings: [{ field: 'skinTone', message: '肤色采样点不足，已使用固定默认肤色。' }],
+    };
   }
 
-  const avgR = Math.round(totalR / count);
-  const avgG = Math.round(totalG / count);
-  const avgB = Math.round(totalB / count);
-  const skinRGB: [number, number, number] = [avgR, avgG, avgB];
-
+  const skinRGB = averageColor(samples);
   return {
-    skinTone: closestSkinTone(avgR, avgG, avgB),
+    skinTone: closestSkinTone(...skinRGB),
     skinRGB,
+    warnings: [],
   };
 }
 
-/**
- * 检测发色：从头顶区域采样像素，排除肤色后取主要颜色。
- */
 function detectHairColor(
   landmarks: Array<Landmark>,
   imageWidth: number,
   imageHeight: number,
-  imageData?: ImageData,
-  skinRGB?: [number, number, number],
-): string {
-  if (!imageData || !skinRGB) {
-    return 'black';
+  imageData: ImageData | undefined,
+  skinRGB: [number, number, number],
+): { hairColor: HairColorName; hairRGB: [number, number, number]; warnings: FeatureDetectionWarning[] } {
+  if (!imageData) {
+    return {
+      hairColor: 'brown',
+      hairRGB: DEFAULT_HAIR_RGB,
+      warnings: [{ field: 'hairColor', message: '未读取到照片像素，发色使用固定默认棕色。' }],
+    };
   }
 
-  // 头顶区域：landmark 10 上方若干像素
-  const topLandmark = landmarks[10];
-  const topPx = Math.round(topLandmark.x * imageWidth);
-  const topPy = Math.round(topLandmark.y * imageHeight);
+  const forehead = landmarks[10];
+  const faceWidthPx = getLandmarkDistance(landmarks[454], landmarks[234]) * imageWidth;
+  const faceHeightPx = getLandmarkDistance(landmarks[152], landmarks[10]) * imageHeight;
+  const centerX = forehead.x * imageWidth;
+  const topY = forehead.y * imageHeight;
+  const samples: Array<[number, number, number]> = [];
+  const xOffsets = [-0.26, -0.18, -0.1, 0, 0.1, 0.18, 0.26];
+  const yOffsets = [-0.28, -0.22, -0.16, -0.1, -0.05];
 
-  // 采样头顶上方几个像素
-  const sampleOffsets = [-2, -4, -6, -8, -10];
-  const hairSamples: Array<[number, number, number]> = [];
+  for (const yRatio of yOffsets) {
+    for (const xRatio of xOffsets) {
+      const color = samplePixelColor(
+        imageData,
+        centerX + faceWidthPx * xRatio,
+        topY + faceHeightPx * yRatio,
+        imageWidth,
+      );
 
-  for (const offset of sampleOffsets) {
-    const sampleY = topPy + offset;
-    if (sampleY < 0) continue;
-
-    const color = samplePixelColor(imageData, topPx, sampleY, imageWidth);
-
-    // 排除肤色相近的像素
-    const dist = euclideanDistance(color, skinRGB);
-    if (dist > 60) {
-      hairSamples.push(color);
+      if (isHairCandidate(color, skinRGB)) {
+        samples.push(color);
+      }
     }
   }
 
-  if (hairSamples.length === 0) {
-    return 'black';
+  if (samples.length < 3) {
+    return {
+      hairColor: 'brown',
+      hairRGB: DEFAULT_HAIR_RGB,
+      warnings: [{ field: 'hairColor', message: '发色采样点不足，已使用固定默认棕色。' }],
+    };
   }
 
-  // 取平均值
-  let totalR = 0;
-  let totalG = 0;
-  let totalB = 0;
-  for (const c of hairSamples) {
-    totalR += c[0];
-    totalG += c[1];
-    totalB += c[2];
-  }
-  const avgR = Math.round(totalR / hairSamples.length);
-  const avgG = Math.round(totalG / hairSamples.length);
-  const avgB = Math.round(totalB / hairSamples.length);
-
-  return getHairColorName(avgR, avgG, avgB);
+  const hairRGB = averageDominantColor(samples);
+  return {
+    hairColor: classifyHairColor(hairRGB),
+    hairRGB,
+    warnings: [],
+  };
 }
 
-/**
- * 检测是否佩戴眼镜：通过鼻梁（landmark 168）与眼角的关键点距离判断。
- */
-function detectGlasses(landmarks: Array<Landmark>): boolean {
-  const noseBridge = landmarks[168];
-  const leftInnerEye = landmarks[133];
-  const rightInnerEye = landmarks[362];
+function detectHairStyle(
+  landmarks: Array<Landmark>,
+  imageWidth: number,
+  imageHeight: number,
+  imageData: ImageData | undefined,
+  hairColor: HairColorName,
+): HairStyle {
+  if (!imageData || hairColor === 'white') return 'short';
 
-  const leftDist = getLandmarkDistance(noseBridge, leftInnerEye);
-  const rightDist = getLandmarkDistance(noseBridge, rightInnerEye);
+  const leftCheek = landmarks[234];
+  const rightCheek = landmarks[454];
+  const chin = landmarks[152];
+  const sampleY = (leftCheek.y + chin.y) * 0.5 * imageHeight;
+  const leftColor = samplePixelColor(imageData, leftCheek.x * imageWidth - 5, sampleY, imageWidth);
+  const rightColor = samplePixelColor(imageData, rightCheek.x * imageWidth + 5, sampleY, imageWidth);
+  const hairMain = hexToRgb(HAIR_PALETTES[hairColor].main);
 
-  // 如果鼻梁到两眼内角的距离都大于阈值，判定为有眼镜
-  const threshold = 0.02;
-  return leftDist > threshold && rightDist > threshold;
+  const sideHair = euclideanDistance(leftColor, hairMain) < 95 || euclideanDistance(rightColor, hairMain) < 95;
+  return sideHair ? 'long' : 'short';
+}
+
+function detectGlasses(
+  landmarks: Array<Landmark>,
+  imageWidth: number,
+  imageHeight: number,
+  imageData?: ImageData,
+): boolean {
+  if (!imageData) return false;
+
+  const bridge = landmarks[168];
+  const leftInner = landmarks[133];
+  const rightInner = landmarks[362];
+  const samples = [
+    samplePixelColor(imageData, bridge.x * imageWidth, bridge.y * imageHeight, imageWidth),
+    samplePixelColor(imageData, leftInner.x * imageWidth, leftInner.y * imageHeight, imageWidth),
+    samplePixelColor(imageData, rightInner.x * imageWidth, rightInner.y * imageHeight, imageWidth),
+  ];
+
+  return samples.filter(isDarkPixel).length >= 2;
+}
+
+function detectBeard(
+  landmarks: Array<Landmark>,
+  imageWidth: number,
+  imageHeight: number,
+  imageData: ImageData | undefined,
+  skinRGB: [number, number, number],
+): boolean {
+  if (!imageData) return false;
+
+  const mouthCenterX = ((landmarks[61].x + landmarks[291].x) / 2) * imageWidth;
+  const lowerFaceY = ((landmarks[199].y + landmarks[152].y) / 2) * imageHeight;
+  const faceWidthPx = getLandmarkDistance(landmarks[454], landmarks[234]) * imageWidth;
+  const samples: Array<[number, number, number]> = [];
+
+  for (const dx of [-0.16, -0.08, 0, 0.08, 0.16]) {
+    samples.push(samplePixelColor(imageData, mouthCenterX + faceWidthPx * dx, lowerFaceY, imageWidth));
+  }
+
+  return samples.filter((color) => isDarkPixel(color) && euclideanDistance(color, skinRGB) > 55).length >= 3;
+}
+
+function detectMakeup(
+  landmarks: Array<Landmark>,
+  imageWidth: number,
+  imageHeight: number,
+  imageData: ImageData | undefined,
+  skinRGB: [number, number, number],
+): boolean {
+  if (!imageData) return false;
+
+  const lipSamples = [13, 14, 61, 291]
+    .filter((idx) => landmarks[idx])
+    .map((idx) => samplePixelColor(imageData, landmarks[idx].x * imageWidth, landmarks[idx].y * imageHeight, imageWidth));
+
+  return lipSamples.some((color) => {
+    const redDominance = color[0] - Math.max(color[1], color[2]);
+    return redDominance > 28 && euclideanDistance(color, skinRGB) > 45;
+  });
+}
+
+function sampleLandmarkCluster(
+  imageData: ImageData,
+  imageWidth: number,
+  imageHeight: number,
+  landmarks: Array<Landmark>,
+  points: Array<{ idx: number; dx: number; dy: number }>,
+): Array<[number, number, number]> {
+  const samples: Array<[number, number, number]> = [];
+  for (const point of points) {
+    const landmark = landmarks[point.idx];
+    if (!landmark) continue;
+    samples.push(samplePixelColor(
+      imageData,
+      landmark.x * imageWidth + point.dx,
+      landmark.y * imageHeight + point.dy,
+      imageWidth,
+    ));
+  }
+  return samples;
+}
+
+function isLikelySkinPixel(color: [number, number, number]): boolean {
+  const [r, g, b] = color;
+  return r > 55 && g > 35 && b > 20 && r >= b && r - b > 10 && Math.abs(r - g) < 95;
+}
+
+function isHairCandidate(color: [number, number, number], skinRGB: [number, number, number]): boolean {
+  if (euclideanDistance(color, skinRGB) < 42) return false;
+  const [r, g, b] = color;
+  const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+  const brightness = (r + g + b) / 3;
+  return brightness < 230 && (brightness < 120 || saturation > 28);
+}
+
+function isDarkPixel(color: [number, number, number]): boolean {
+  return (color[0] + color[1] + color[2]) / 3 < 95;
+}
+
+function classifyHairColor(color: [number, number, number]): HairColorName {
+  const [r, g, b] = color;
+  const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+  const brightness = (r + g + b) / 3;
+
+  if (brightness < 52) return 'black';
+  if (r > g + 28 && r > b + 35 && saturation > 45) return 'red';
+  if (b > r + 25 && b > g + 10) return 'blue';
+  if (r > 180 && b > 130 && g < 165) return 'pink';
+  if (r > 185 && g > 155 && b < 115) return 'blonde';
+  if (brightness > 190 && saturation < 35) return 'white';
+  return getHairColorName(...color);
+}
+
+function averageColor(colors: Array<[number, number, number]>): [number, number, number] {
+  const totals = colors.reduce(
+    (acc, color) => [acc[0] + color[0], acc[1] + color[1], acc[2] + color[2]] as [number, number, number],
+    [0, 0, 0] as [number, number, number],
+  );
+  return [
+    Math.round(totals[0] / colors.length),
+    Math.round(totals[1] / colors.length),
+    Math.round(totals[2] / colors.length),
+  ];
+}
+
+function averageDominantColor(colors: Array<[number, number, number]>): [number, number, number] {
+  const sorted = [...colors].sort((a, b) => colorScore(b) - colorScore(a));
+  return averageColor(sorted.slice(0, Math.max(3, Math.ceil(sorted.length * 0.55))));
+}
+
+function colorScore(color: [number, number, number]): number {
+  const saturation = Math.max(...color) - Math.min(...color);
+  const darkness = 255 - (color[0] + color[1] + color[2]) / 3;
+  return saturation * 1.4 + darkness;
+}
+
+function deterministicShirtColor(input: {
+  shape: FaceShape;
+  eyeSize: EyeSize;
+  skinTone: SkinTone;
+  hairColor: HairColorName;
+  hasGlasses: boolean;
+  hasBeard: boolean;
+  hasMakeup: boolean;
+}): string {
+  const seed = `${input.shape}|${input.eyeSize}|${input.skinTone}|${input.hairColor}|${input.hasGlasses}|${input.hasBeard}|${input.hasMakeup}`;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return SHIRT_COLORS[hash % SHIRT_COLORS.length];
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '');
+  return [
+    parseInt(clean.slice(0, 2), 16),
+    parseInt(clean.slice(2, 4), 16),
+    parseInt(clean.slice(4, 6), 16),
+  ];
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }

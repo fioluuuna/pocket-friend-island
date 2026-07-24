@@ -4,7 +4,7 @@
  * 支持五种发型：short / long / curly / ponytail / bald。
  */
 
-import type { HairStyle } from '../../types';
+import type { HairColorName, HairStyle } from '../../types';
 import { HAIR_PALETTES } from '../pixel-palettes';
 
 /** 填充单个像素 */
@@ -40,17 +40,18 @@ export function drawHair(
   offsetX: number,
   offsetY: number,
   hairStyle: HairStyle,
-  hairColor: string,
+  hairColor: HairColorName,
   pixelSize: number = 1,
+  hairRGB?: [number, number, number],
 ): void {
   if (hairStyle === 'bald') {
     return;
   }
 
   const palette = HAIR_PALETTES[hairColor] ?? HAIR_PALETTES.black;
-  const mainColor = palette.main;
-  const shadowColor = palette.shadow;
-  const highlightColor = palette.highlight;
+  const mainColor = hairRGB ? rgbToHex(hairRGB) : palette.main;
+  const shadowColor = hairRGB ? adjustColor(mainColor, -38) : palette.shadow;
+  const highlightColor = hairRGB ? adjustColor(mainColor, 42) : palette.highlight;
 
   switch (hairStyle) {
     case 'short': {
@@ -228,4 +229,16 @@ function drawPonytailHair(
       fillPixel(ctx, 27, y, main, ox, oy, ps);
     }
   }
+}
+
+function rgbToHex(rgb: [number, number, number]): string {
+  return `#${rgb.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function adjustColor(hex: string, amount: number): string {
+  const clean = hex.replace('#', '');
+  const r = Math.max(0, Math.min(255, parseInt(clean.slice(0, 2), 16) + amount));
+  const g = Math.max(0, Math.min(255, parseInt(clean.slice(2, 4), 16) + amount));
+  const b = Math.max(0, Math.min(255, parseInt(clean.slice(4, 6), 16) + amount));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }

@@ -4,6 +4,9 @@
  * 采用 2-3 头身比例，从脸下方开始绘制 T 恤和手臂。
  */
 
+import type { SkinTone } from '../../types';
+import { SKIN_PALETTES } from '../pixel-palettes';
+
 /** 填充单个像素 */
 function fillPixel(
   ctx: CanvasRenderingContext2D,
@@ -55,16 +58,20 @@ export function drawBody(
   offsetY: number,
   shirtColor: string,
   pixelSize: number = 1,
+  skinTone: SkinTone = 'light',
+  skinRGB?: [number, number, number],
 ): void {
   const mainColor = shirtColor;
   const shadowColor = darkenColor(shirtColor, 40);
   const highlightColor = lightenColor(shirtColor, 25);
-  const neckColor = '#F5CBA7'; // 脖子用通用肤色
+  const skinPalette = SKIN_PALETTES[skinTone];
+  const skinColor = skinRGB ? rgbToHex(skinRGB) : skinPalette.main;
+  const skinShadow = skinRGB ? darkenColor(skinColor, 28) : skinPalette.shadow;
 
   // 脖子 (y=22~23, x=14~18)
   for (let y = 22; y <= 23; y++) {
     for (let x = 14; x <= 18; x++) {
-      fillPixel(ctx, x, y, neckColor, offsetX, offsetY, pixelSize);
+      fillPixel(ctx, x, y, skinShadow, offsetX, offsetY, pixelSize);
     }
   }
 
@@ -107,10 +114,14 @@ export function drawBody(
   // 手臂（两侧各 2 像素宽，y=25~30）
   for (let y = 25; y <= 30; y++) {
     // 左手臂
-    fillPixel(ctx, 7, y, shadowColor, offsetX, offsetY, pixelSize);
-    fillPixel(ctx, 8, y, mainColor, offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 7, y, skinShadow, offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 8, y, skinColor, offsetX, offsetY, pixelSize);
     // 右手臂
-    fillPixel(ctx, 23, y, mainColor, offsetX, offsetY, pixelSize);
-    fillPixel(ctx, 24, y, shadowColor, offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 23, y, skinColor, offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 24, y, skinShadow, offsetX, offsetY, pixelSize);
   }
+}
+
+function rgbToHex(rgb: [number, number, number]): string {
+  return `#${rgb.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
 }

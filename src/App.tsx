@@ -1,6 +1,6 @@
 /**
  * Pocket Friend Island - 主应用组件
- * @description 三个视图切换（island / matching / profile），管理附近匹配和居民状态，
+ * @description 四个视图切换（island / matching / profile / avatar），管理附近匹配和居民状态，
  *              MockBLEScanner 自动启动扫描，收到 scan 事件后使用匹配引擎计算匹配分数。
  * @module App
  */
@@ -19,9 +19,10 @@ import {
   type ProximityEvent,
   COLLABORATION_STYLE_LABELS,
 } from './types';
+import { TestAvatar } from './TestAvatar';
 
 /** 应用视图类型 */
-type AppView = 'island' | 'matching' | 'profile';
+type AppView = 'island' | 'matching' | 'profile' | 'avatar';
 
 /** 雷达检测设备信息（扩展匹配等级） */
 interface RadarDevice extends ProximityEvent {
@@ -285,17 +286,21 @@ export function App(): React.JSX.Element {
             </div>
           </div>
         )}
+
+        {currentView === 'avatar' && (
+          <TestAvatar />
+        )}
       </main>
 
       {/* 底部导航 */}
       <nav className="app-nav">
-        {(['island', 'matching', 'profile'] as const).map((view) => (
+        {(['island', 'matching', 'profile', 'avatar'] as const).map((view) => (
           <button
             key={view}
             style={getNavStyle(view)}
             onClick={() => setCurrentView(view)}
           >
-            {view === 'island' ? '小岛' : view === 'matching' ? '匹配' : '档案'}
+            {view === 'island' ? '小岛' : view === 'matching' ? '匹配' : view === 'profile' ? '档案' : '造人'}
           </button>
         ))}
       </nav>

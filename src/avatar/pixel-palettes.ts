@@ -4,7 +4,7 @@
  * 提供欧氏距离匹配函数，用于从采样颜色反推最接近的预置色。
  */
 
-import type { SkinTone } from '../types';
+import type { HairColorName, SkinTone } from '../types';
 
 /** 肤色调色板：每种肤色包含主色、阴影色、高光色和 RGB 值 */
 export const SKIN_PALETTES: Record<
@@ -45,7 +45,7 @@ export const SKIN_PALETTES: Record<
 
 /** 发色调色板：每种发色包含主色、阴影色和高光色 */
 export const HAIR_PALETTES: Record<
-  string,
+  HairColorName,
   { main: string; shadow: string; highlight: string }
 > = {
   black:  { main: '#1a1a2e', shadow: '#0f0f1a', highlight: '#2a2a4e' },
@@ -133,13 +133,13 @@ function hexToRgb(hex: string): [number, number, number] {
  * @param b - 蓝色通道 (0-255)
  * @returns 最接近的发色名称（如 'black', 'brown' 等）
  */
-export function getHairColorName(r: number, g: number, b: number): string {
+export function getHairColorName(r: number, g: number, b: number): HairColorName {
   const sample: [number, number, number] = [r, g, b];
 
-  let bestName = 'black';
+  let bestName: HairColorName = 'black';
   let bestDist = Infinity;
 
-  for (const [name, palette] of Object.entries(HAIR_PALETTES)) {
+  for (const [name, palette] of Object.entries(HAIR_PALETTES) as Array<[HairColorName, typeof HAIR_PALETTES[HairColorName]]>) {
     const rgb = hexToRgb(palette.main);
     const dist = euclideanDistance(sample, rgb);
     if (dist < bestDist) {

@@ -6,7 +6,7 @@
  */
 
 import type { FaceFeatures } from '../types';
-import { extractFeaturesFromLandmarks } from './feature-extractor';
+import { extractFeaturesFromLandmarks, getDefaultFaceFeatures } from './feature-extractor';
 
 /** FaceMesh 实例的类型接口 */
 interface FaceMeshLike {
@@ -31,6 +31,9 @@ let loadingPromise: Promise<void> | null = null;
 let lastDetectedFeatures: FaceFeatures | null = null;
 /** 用于等待检测完成的 resolve 回调 */
 let detectionResolve: ((features: FaceFeatures | null) => void) | null = null;
+let pendingImageData: ImageData | undefined;
+let pendingImageWidth = 1;
+let pendingImageHeight = 1;
 
 /**
  * 初始化 MediaPipe Face Mesh 模型。
@@ -71,9 +74,14 @@ export async function initFaceDetector(): Promise<void> {
       faceMesh.onResults((results: FaceMeshResults): void => {
         if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
           const landmarks = results.multiFaceLandmarks[0];
-          lastDetectedFeatures = extractFeaturesFromLandmarks(landmarks, 1, 1);
+          lastDetectedFeatures = extractFeaturesFromLandmarks(
+            landmarks,
+            pendingImageWidth,
+            pendingImageHeight,
+            pendingImageData,
+          );
         } else {
-          lastDetectedFeatures = null;
+          lastDetectedFeatures = getDefaultFaceFeatures('未检测到人脸，已使用固定默认像素小人。');
         }
 
         if (detectionResolve) {
@@ -103,15 +111,20 @@ export async function initFaceDetector(): Promise<void> {
  * @returns FaceFeatures 对象，未检测到人脸时返回 null
  */
 export async function detectFace(
-  imageSource: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
+  imageSource: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageBitmap,
 ): Promise<FaceFeatures | null> {
   await initFaceDetector();
 
   if (!faceMeshInstance || !modelLoaded) {
-    return null;
+    return getDefaultFaceFeatures('人脸检测模型加载失败，已使用固定默认像素小人。');
   }
 
   try {
+    const prepared = prepareImageForDetection(imageSource);
+    pendingImageData = prepared.imageData;
+    pendingImageWidth = prepared.width;
+    pendingImageHeight = prepared.height;
+
     // 重置检测状态
     lastDetectedFeatures = null;
 
@@ -121,14 +134,18 @@ export async function detectFace(
     });
 
     // 发送图像给 FaceMesh 处理
-    await faceMeshInstance.send({ image: imageSource });
+    await faceMeshInstance.send({ image: prepared.canvas });
 
     // 等待 onResults 回调中 resolve
     const features = await resultPromise;
     return features;
   } catch (error) {
     console.warn('[face-detector] Face detection failed:', error);
-    return null;
+    return getDefaultFaceFeatures('人脸检测过程失败，已使用固定默认像素小人。');
+  } finally {
+    pendingImageData = undefined;
+    pendingImageWidth = 1;
+    pendingImageHeight = 1;
   }
 }
 
@@ -138,4 +155,48 @@ export async function detectFace(
  */
 export function isModelLoaded(): boolean {
   return modelLoaded;
+}
+
+function prepareImageForDetection(
+  imageSource: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageBitmap,
+): { canvas: HTMLCanvasElement; imageData: ImageData; width: number; height: number } {
+  if (imageSource instanceof HTMLCanvasElement) {
+    const ctx = imageSource.getContext('2d', { willReadFrequently: true });
+    if (!ctx) throw new Error('[face-detector] Failed to read source canvas.');
+    return {
+      canvas: imageSource,
+      imageData: ctx.getImageData(0, 0, imageSource.width, imageSource.height),
+      width: imageSource.width,
+      height: imageSource.height,
+    };
+  }
+
+  const width = getSourceWidth(imageSource);
+  const height = getSourceHeight(imageSource);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('[face-detector] Failed to create detection canvas.');
+
+  ctx.drawImage(imageSource, 0, 0, width, height);
+
+  return {
+    canvas,
+    imageData: ctx.getImageData(0, 0, width, height),
+    width,
+    height,
+  };
+}
+
+function getSourceWidth(source: HTMLImageElement | HTMLVideoElement | ImageBitmap): number {
+  if (source instanceof HTMLImageElement) return source.naturalWidth || source.width;
+  if (source instanceof HTMLVideoElement) return source.videoWidth || source.width;
+  return source.width;
+}
+
+function getSourceHeight(source: HTMLImageElement | HTMLVideoElement | ImageBitmap): number {
+  if (source instanceof HTMLImageElement) return source.naturalHeight || source.height;
+  if (source instanceof HTMLVideoElement) return source.videoHeight || source.height;
+  return source.height;
 }

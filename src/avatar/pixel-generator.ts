@@ -1,25 +1,16 @@
 /**
- * @module pixel-generator
- * @description 像素小人生成主模块。
- * 根据配置或面部特征生成 32x32 像素风格小人头像。
+ * Deterministic 32x32 pixel avatar generator.
  */
 
-import type { FaceFeatures, PixelAvatarConfig, FaceShape, EyeSize, SkinTone, HairStyle } from '../types';
+import type { FaceFeatures, PixelAvatarConfig, FaceShape, EyeSize, SkinTone, HairStyle, HairColorName } from '../types';
 import { drawFace } from './parts/draw-face';
 import { drawEyes } from './parts/draw-eyes';
 import { drawHair } from './parts/draw-hair';
 import { drawBody } from './parts/draw-body';
 import { SHIRT_COLORS } from './pixel-palettes';
 
-/**
- * 根据 PixelAvatarConfig 生成像素小人头像 Canvas。
- * 支持两种配置模式：
- * 1. 完整模式：使用 config.face 对象的各个字段
- * 2. 快捷模式：使用 config.skinTone, config.faceShape 等顶层字段（avatar 模块扩展）
- * @param config - 像素小人配置对象
- * @param size - 输出 Canvas 边长（像素），默认 64。将 32x32 逻辑网格映射到此大小
- * @returns 绘制好的 HTMLCanvasElement
- */
+const DEFAULT_SHIRT_COLOR = SHIRT_COLORS[5];
+
 export function generatePixelAvatar(
   config: PixelAvatarConfig,
   size: number = 64,
@@ -33,42 +24,43 @@ export function generatePixelAvatar(
     throw new Error('[pixel-generator] Failed to get 2D context from canvas.');
   }
 
-  const pixelSize = size / 32; // 将 32x32 像素映射到实际 canvas 大小
-
-  // 清空（透明背景）
+  const pixelSize = size / 32;
   ctx.clearRect(0, 0, size, size);
+  ctx.imageSmoothingEnabled = false;
 
-  // 解析配置（支持快捷模式和完整模式）
-  const shirtColor = config.shirtColor ?? config.bodyColor;
   const faceShape: FaceShape = config.faceShape ?? config.face.shape;
   const skinTone: SkinTone = config.skinTone ?? config.face.skinTone;
   const eyeSize: EyeSize = config.eyeSize ?? config.face.eyeSize;
   const eyeDistance = config.face.eyeDistance ?? 0.5;
   const hairStyle: HairStyle = config.hairStyle ?? config.face.hairStyle;
-  const hairColor: string = config.hairColor ?? 'black';
+  const hairColor: HairColorName = config.hairColor ?? config.face.hairColor ?? 'brown';
+  const shirtColor = config.shirtColor ?? config.face.shirtColor ?? config.bodyColor ?? DEFAULT_SHIRT_COLOR;
+  const skinRGB = config.face.skinRGB;
+  const hairRGB = config.face.hairRGB;
+  const hasGlasses = config.face.genderPresentation?.hasGlasses ?? config.face.hasGlasses;
+  const hasBeard = config.face.genderPresentation?.hasBeard ?? config.face.hasBeard;
+  const hasMakeup = config.face.genderPresentation?.hasMakeup ?? config.face.hasMakeup ?? false;
 
-  // 图层顺序：身体 -> 脸型 -> 眼睛 -> 头发
-  drawBody(ctx, 0, 0, shirtColor, pixelSize);
-  drawFace(ctx, 0, 0, faceShape, skinTone, pixelSize);
+  drawBody(ctx, 0, 0, shirtColor, pixelSize, skinTone, skinRGB);
+  drawFace(ctx, 0, 0, faceShape, skinTone, pixelSize, skinRGB);
   drawEyes(ctx, 0, 0, eyeSize, eyeDistance, pixelSize);
-  drawHair(ctx, 0, 0, hairStyle, hairColor, pixelSize);
+  drawHair(ctx, 0, 0, hairStyle, hairColor, pixelSize, hairRGB);
+  drawGenderPresentation(ctx, 0, 0, pixelSize, {
+    hasGlasses,
+    hasBeard,
+    hasMakeup,
+    hairColor,
+    hairRGB,
+  });
 
   return canvas;
 }
 
-/**
- * 从 FaceFeatures 生成像素小人头像 Canvas。
- * 自动选择随机 T 恤颜色，其他参数从特征中提取。
- * @param features - 面部特征对象
- * @param size - 输出 Canvas 边长（像素），默认 64
- * @returns 绘制好的 HTMLCanvasElement
- */
 export function generatePixelAvatarFromFeatures(
   features: FaceFeatures,
   size: number = 64,
 ): HTMLCanvasElement {
-  // 随机选择衬衫颜色
-  const shirtColor = SHIRT_COLORS[Math.floor(Math.random() * SHIRT_COLORS.length)];
+  const shirtColor = features.shirtColor ?? deterministicColorFromFeatures(features);
 
   const config: PixelAvatarConfig = {
     face: {
@@ -78,9 +70,15 @@ export function generatePixelAvatarFromFeatures(
       hairStyle: features.hairStyle,
       hasGlasses: features.hasGlasses,
       hasBeard: features.hasBeard,
+      hasMakeup: features.hasMakeup,
+      genderPresentation: features.genderPresentation,
       eyeDistance: features.eyeDistance,
       skinRGB: features.skinRGB,
+      hairRGB: features.hairRGB,
       hairColor: features.hairColor,
+      shirtColor,
+      usedFallback: features.usedFallback,
+      warnings: features.warnings,
     },
     bodyColor: shirtColor,
     shirtColor,
@@ -91,12 +89,6 @@ export function generatePixelAvatarFromFeatures(
   return generatePixelAvatar(config, size);
 }
 
-/**
- * 将 Canvas 转换为 Data URL 字符串。
- * @param canvas - 要导出的 Canvas 元素
- * @param format - 图片格式，默认 'image/png'
- * @returns Base64 编码的 Data URL
- */
 export function canvasToDataURL(
   canvas: HTMLCanvasElement,
   format: string = 'image/png',
@@ -104,42 +96,132 @@ export function canvasToDataURL(
   return canvas.toDataURL(format);
 }
 
-/** 从数组中随机取一个元素 */
-function randomPick<T>(arr: readonly T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
 /**
- * 生成一个随机配置的像素小人头像，用于 demo/mock。
- * @param size - 输出 Canvas 边长（像素），默认 64
- * @returns 绘制好的 HTMLCanvasElement
+ * Kept for demo/mock callers, but now intentionally deterministic.
  */
 export function generateRandomAvatar(size: number = 64): HTMLCanvasElement {
-  const faceShapes: FaceShape[] = ['round', 'oval', 'square', 'long', 'heart'];
-  const eyeSizes: EyeSize[] = ['big', 'medium', 'small'];
-  const skinTones: SkinTone[] = ['fair', 'light', 'medium', 'tan', 'deep'];
-  const hairStyles: HairStyle[] = ['short', 'long', 'curly', 'ponytail', 'bald'];
-  const hairColorNames = ['black', 'brown', 'blonde', 'red', 'blue', 'pink', 'white'];
-
-  const config: PixelAvatarConfig = {
-    face: {
-      shape: randomPick(faceShapes),
-      eyeSize: randomPick(eyeSizes),
-      skinTone: randomPick(skinTones),
-      hairStyle: randomPick(hairStyles),
+  return generatePixelAvatarFromFeatures({
+    shape: 'oval',
+    eyeSize: 'medium',
+    skinTone: 'light',
+    hairStyle: 'short',
+    hasGlasses: false,
+    hasBeard: false,
+    hasMakeup: false,
+    genderPresentation: {
       hasGlasses: false,
       hasBeard: false,
+      hasMakeup: false,
     },
-    bodyColor: randomPick(SHIRT_COLORS),
-    shirtColor: randomPick(SHIRT_COLORS),
-    accessory: '',
-    expression: 'happy',
-    faceShape: randomPick(faceShapes),
-    skinTone: randomPick(skinTones),
-    eyeSize: randomPick(eyeSizes),
-    hairStyle: randomPick(hairStyles),
-    hairColor: randomPick(hairColorNames),
-  };
+    eyeDistance: 0.5,
+    skinRGB: [245, 203, 167],
+    hairRGB: [93, 64, 55],
+    hairColor: 'brown',
+    shirtColor: DEFAULT_SHIRT_COLOR,
+    usedFallback: true,
+    warnings: [{ field: 'image', message: 'Demo avatar uses fixed default features.' }],
+  }, size);
+}
 
-  return generatePixelAvatar(config, size);
+function drawGenderPresentation(
+  ctx: CanvasRenderingContext2D,
+  offsetX: number,
+  offsetY: number,
+  pixelSize: number,
+  options: {
+    hasGlasses: boolean;
+    hasBeard: boolean;
+    hasMakeup: boolean;
+    hairColor: HairColorName;
+    hairRGB?: [number, number, number];
+  },
+): void {
+  if (options.hasBeard) {
+    const beardColor = options.hairRGB ? rgbToHex(options.hairRGB) : beardFallback(options.hairColor);
+    for (let y = 17; y <= 21; y++) {
+      const start = y < 20 ? 12 : 13;
+      const end = y < 20 ? 20 : 19;
+      for (let x = start; x <= end; x++) {
+        if (y === 17 && x >= 14 && x <= 18) continue;
+        fillPixel(ctx, x, y, darkenColor(beardColor, 20), offsetX, offsetY, pixelSize);
+      }
+    }
+  }
+
+  if (options.hasMakeup) {
+    fillPixel(ctx, 14, 18, '#D81B60', offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 15, 19, '#AD1457', offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 16, 19, '#AD1457', offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 17, 19, '#AD1457', offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 18, 18, '#D81B60', offsetX, offsetY, pixelSize);
+  }
+
+  if (options.hasGlasses) {
+    const frame = '#1A1A2E';
+    for (let x = 10; x <= 14; x++) fillPixel(ctx, x, 12, frame, offsetX, offsetY, pixelSize);
+    for (let x = 18; x <= 22; x++) fillPixel(ctx, x, 12, frame, offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 15, 12, frame, offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 16, 12, frame, offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 17, 12, frame, offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 10, 13, frame, offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 14, 13, frame, offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 18, 13, frame, offsetX, offsetY, pixelSize);
+    fillPixel(ctx, 22, 13, frame, offsetX, offsetY, pixelSize);
+  }
+}
+
+function deterministicColorFromFeatures(features: FaceFeatures): string {
+  const seed = [
+    features.shape,
+    features.eyeSize,
+    features.skinTone,
+    features.hairStyle,
+    features.hairColor ?? 'brown',
+    features.hasGlasses,
+    features.hasBeard,
+    features.hasMakeup ?? false,
+  ].join('|');
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return SHIRT_COLORS[hash % SHIRT_COLORS.length];
+}
+
+function fillPixel(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  color: string,
+  offsetX: number,
+  offsetY: number,
+  pixelSize: number,
+): void {
+  ctx.fillStyle = color;
+  ctx.fillRect(offsetX + x * pixelSize, offsetY + y * pixelSize, pixelSize, pixelSize);
+}
+
+function beardFallback(hairColor: HairColorName): string {
+  const map: Record<HairColorName, string> = {
+    black: '#1A1A2E',
+    brown: '#5D4037',
+    blonde: '#CDAA18',
+    red: '#A82020',
+    blue: '#039BE5',
+    pink: '#EC407A',
+    white: '#BDBDBD',
+  };
+  return map[hairColor];
+}
+
+function rgbToHex(rgb: [number, number, number]): string {
+  return `#${rgb.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function darkenColor(hex: string, amount: number): string {
+  const clean = hex.replace('#', '');
+  const r = Math.max(0, parseInt(clean.slice(0, 2), 16) - amount);
+  const g = Math.max(0, parseInt(clean.slice(2, 4), 16) - amount);
+  const b = Math.max(0, parseInt(clean.slice(4, 6), 16) - amount);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }

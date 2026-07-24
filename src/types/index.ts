@@ -114,6 +114,29 @@ export type HairStyle = "short" | "long" | "curly" | "bald" | "ponytail";
 /** 肤色 */
 export type SkinTone = "fair" | "light" | "medium" | "tan" | "deep";
 
+/** 像素渲染器支持的发色桶 */
+export type HairColorName =
+  | "black"
+  | "brown"
+  | "blonde"
+  | "red"
+  | "blue"
+  | "pink"
+  | "white";
+
+/** 性别表达相关视觉特征 */
+export interface GenderPresentationFeatures {
+  hasBeard: boolean;
+  hasMakeup: boolean;
+  hasGlasses: boolean;
+}
+
+/** 特征提取失败或低置信度时展示给用户的提示 */
+export interface FeatureDetectionWarning {
+  field: keyof FaceFeatures | "image" | "landmarks";
+  message: string;
+}
+
 /** 面部特征配置（含 avatar 模块扩展字段） */
 export interface FaceFeatures {
   shape: FaceShape;
@@ -122,12 +145,24 @@ export interface FaceFeatures {
   hairStyle: HairStyle;
   hasGlasses: boolean;
   hasBeard: boolean;
+  /** 妆容/明显唇眼色彩提示 */
+  hasMakeup?: boolean;
+  /** 汇总后的性别表达视觉特征 */
+  genderPresentation?: GenderPresentationFeatures;
   /** 眼间距归一化值 0-1（avatar 模块扩展） */
   eyeDistance?: number;
   /** 肤色 RGB 值（avatar 模块扩展） */
   skinRGB?: [number, number, number];
+  /** 发色采样 RGB 值（avatar 模块扩展） */
+  hairRGB?: [number, number, number];
   /** 发色名称（avatar 模块扩展） */
-  hairColor?: string;
+  hairColor?: HairColorName;
+  /** 根据照片特征确定性派生出的衣服颜色 */
+  shirtColor?: string;
+  /** 是否使用过明确默认值 */
+  usedFallback?: boolean;
+  /** 展示给用户的默认值/低置信度说明 */
+  warnings?: FeatureDetectionWarning[];
 }
 
 /** 像素小人完整配置（含 avatar 模块扩展字段） */
@@ -147,7 +182,7 @@ export interface PixelAvatarConfig {
   /** 发型快捷字段（avatar 模块扩展，与 face.hairStyle 二选一） */
   hairStyle?: HairStyle;
   /** 发色快捷字段（avatar 模块扩展） */
-  hairColor?: string;
+  hairColor?: HairColorName;
 }
 
 /** 岛上居民 */
