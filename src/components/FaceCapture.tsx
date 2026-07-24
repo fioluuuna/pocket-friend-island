@@ -1,19 +1,24 @@
 import { useMemo, useState } from 'react';
-import { detectFace, generatePixelAvatarFromFeatures } from '../avatar';
+import { detectFace } from '../avatar';
+import { generateSeedreamPixelAvatar } from '../api';
 import type { FaceFeatures } from '../types';
 
+type GenerationStage = 'idle' | 'extracting' | 'generating' | 'done';
+
 interface FaceCaptureState {
-  avatarUrl: string | null;
+  referenceUrl: string | null;
+  seedreamUrl: string | null;
   features: FaceFeatures | null;
-  loading: boolean;
+  stage: GenerationStage;
   error: string | null;
 }
 
 export function FaceCapture(): React.JSX.Element {
   const [state, setState] = useState<FaceCaptureState>({
-    avatarUrl: null,
+    referenceUrl: null,
+    seedreamUrl: null,
     features: null,
-    loading: false,
+    stage: 'idle',
     error: null,
   });
 
@@ -30,12 +35,26 @@ export function FaceCapture(): React.JSX.Element {
     ].filter((tag): tag is string => Boolean(tag));
   }, [state.features]);
 
+  const busy = state.stage === 'extracting' || state.stage === 'generating';
+  const buttonText = state.stage === 'extracting'
+    ? 'READING PHOTO'
+    : state.stage === 'generating'
+      ? 'SEEDREAMING'
+      : 'UPLOAD PHOTO';
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.currentTarget.value = '';
     if (!file) return;
 
-    setState((prev) => ({ ...prev, loading: true, error: null }));
+    const referenceUrl = URL.createObjectURL(file);
+    setState({
+      referenceUrl,
+      seedreamUrl: null,
+      features: null,
+      stage: 'extracting',
+      error: null,
+    });
 
     try {
       const bitmap = await createImageBitmap(file);
@@ -43,146 +62,255 @@ export function FaceCapture(): React.JSX.Element {
       bitmap.close();
 
       if (!features) {
-        throw new Error('未获得头像特征。');
+        throw new Error('Feature extraction returned empty result.');
       }
 
-      const canvas = generatePixelAvatarFromFeatures(features, 128);
-      setState({
-        avatarUrl: canvas.toDataURL('image/png'),
+      setState((prev) => ({
+        ...prev,
         features,
-        loading: false,
+        stage: 'generating',
+      }));
+
+      const result = await generateSeedreamPixelAvatar(file);
+      setState((prev) => ({
+        ...prev,
+        seedreamUrl: result.imageUrl,
+        stage: 'done',
         error: null,
-      });
+      }));
     } catch (error) {
-      setState({
-        avatarUrl: null,
-        features: null,
-        loading: false,
-        error: error instanceof Error ? error.message : '照片处理失败。',
-      });
+      setState((prev) => ({
+        ...prev,
+        stage: 'done',
+        error: error instanceof Error ? error.message : 'Seedream generation failed.',
+      }));
     }
   };
 
   return (
-    <section style={styles.panel}>
-      <h2 style={styles.title}>照片像素小人</h2>
+    <section style={styles.shell}>
+      <div style={styles.header}>
+        <div>
+          <p style={styles.kicker}>POCKET FRIEND</p>
+          <h2 style={styles.title}>Avatar Forge</h2>
+        </div>
+        <span style={styles.status}>{state.stage === 'idle' ? 'READY' : state.stage.toUpperCase()}</span>
+      </div>
 
-      <label style={styles.uploadButton}>
+      <label style={{ ...styles.uploadButton, opacity: busy ? 0.58 : 1 }}>
         <input
           type="file"
           accept="image/*"
           onChange={handleFileUpload}
           style={styles.fileInput}
-          disabled={state.loading}
+          disabled={busy}
         />
-        {state.loading ? '提取中...' : '上传照片'}
+        {buttonText}
       </label>
 
-      {state.error && <p style={styles.error}>{state.error}</p>}
+      <div style={styles.previewGrid}>
+        <PreviewSlot title="REF" imageUrl={state.referenceUrl} />
+        <PreviewSlot title="SEEDREAM" imageUrl={state.seedreamUrl} loading={state.stage === 'generating'} />
+      </div>
 
-      {state.avatarUrl && (
-        <div style={styles.result}>
-          <img src={state.avatarUrl} alt="像素小人" width={128} height={128} style={styles.avatar} />
-
-          {featureTags.length > 0 && (
-            <div style={styles.tags}>
-              {featureTags.map((tag) => (
-                <span key={tag} style={styles.tag}>{tag}</span>
-              ))}
-            </div>
-          )}
-
-          {state.features?.warnings && state.features.warnings.length > 0 && (
-            <div style={styles.warningBox}>
-              {state.features.warnings.map((warning) => (
-                <p key={`${warning.field}:${warning.message}`} style={styles.warning}>
-                  {warning.message}
-                </p>
-              ))}
-            </div>
-          )}
+      {featureTags.length > 0 && (
+        <div style={styles.tags}>
+          {featureTags.map((tag) => (
+            <span key={tag} style={styles.tag}>{tag}</span>
+          ))}
         </div>
       )}
+
+      {state.features?.warnings && state.features.warnings.length > 0 && (
+        <div style={styles.notice}>
+          {state.features.warnings.map((warning) => (
+            <p key={`${warning.field}:${warning.message}`} style={styles.noticeText}>
+              {warning.message}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {state.error && <p style={styles.error}>{state.error}</p>}
     </section>
   );
 }
 
+function PreviewSlot({
+  title,
+  imageUrl,
+  loading = false,
+}: {
+  title: string;
+  imageUrl: string | null;
+  loading?: boolean;
+}): React.JSX.Element {
+  return (
+    <div style={styles.previewSlot}>
+      <span style={styles.slotTitle}>{title}</span>
+      <div style={styles.imageStage}>
+        {imageUrl ? (
+          <img src={imageUrl} alt={title} style={styles.resultImage} />
+        ) : (
+          <span style={styles.emptyText}>{loading ? '...' : '--'}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const ink = '#182336';
+const cyan = '#22C7F2';
+const lime = '#A7F018';
+const pink = '#F04AA5';
+const mint = '#D5F5E8';
+const card = '#F8FFF7';
+
 const styles: Record<string, React.CSSProperties> = {
-  panel: {
-    width: '100%',
-    maxWidth: 420,
+  shell: {
+    width: 'min(100%, 760px)',
     display: 'flex',
     flexDirection: 'column',
+    gap: 14,
+    padding: 16,
+    border: `3px solid ${ink}`,
+    background: card,
+    boxShadow: `6px 6px 0 ${ink}`,
+    color: ink,
+    fontFamily: 'VT323, ui-monospace, monospace',
+    backgroundImage:
+      'linear-gradient(rgba(24,35,54,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(24,35,54,.06) 1px, transparent 1px)',
+    backgroundSize: '12px 12px',
+  },
+  header: {
+    display: 'flex',
     alignItems: 'center',
-    gap: 16,
-    padding: 20,
-    background: '#FFFDE7',
-    border: '4px solid #5D4037',
-    boxShadow: '6px 6px 0 #3E2723',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  kicker: {
+    margin: '0 0 4px',
+    fontFamily: '"Press Start 2P", ui-monospace, monospace',
+    fontSize: 7,
+    color: pink,
+    lineHeight: 1.6,
   },
   title: {
     margin: 0,
-    fontSize: 12,
-    color: '#3E2723',
+    fontFamily: '"Press Start 2P", ui-monospace, monospace',
+    fontSize: 14,
+    lineHeight: 1.45,
+    color: cyan,
+    textShadow: `2px 0 0 ${ink}, -2px 0 0 ${ink}, 0 2px 0 ${ink}, 0 -2px 0 ${ink}, 3px 3px 0 ${lime}`,
+  },
+  status: {
+    minWidth: 76,
+    padding: '6px 8px',
+    border: `2px solid ${ink}`,
+    background: lime,
+    boxShadow: `2px 2px 0 ${ink}`,
+    fontFamily: '"Press Start 2P", ui-monospace, monospace',
+    fontSize: 7,
+    textAlign: 'center',
+    lineHeight: 1.5,
   },
   uploadButton: {
+    minHeight: 44,
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 40,
     padding: '10px 14px',
-    border: '3px solid #5D4037',
-    background: '#4FC3F7',
+    border: `2px solid ${ink}`,
+    background: pink,
     color: '#FFFFFF',
-    boxShadow: '3px 3px 0 #3E2723',
+    boxShadow: `3px 3px 0 ${ink}`,
     cursor: 'pointer',
-    fontSize: 9,
-    lineHeight: 1.4,
+    fontFamily: '"Press Start 2P", ui-monospace, monospace',
+    fontSize: 8,
+    lineHeight: 1.5,
   },
   fileInput: {
     display: 'none',
   },
-  result: {
+  previewGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+    gap: 10,
+    alignItems: 'stretch',
+  },
+  previewSlot: {
+    minHeight: 230,
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
-    gap: 10,
+    gap: 6,
+    padding: 8,
+    border: `2px solid ${ink}`,
+    background: mint,
+    boxShadow: `3px 3px 0 ${ink}`,
   },
-  avatar: {
+  slotTitle: {
+    minHeight: 20,
+    fontFamily: '"Press Start 2P", ui-monospace, monospace',
+    fontSize: 7,
+    lineHeight: 1.6,
+  },
+  imageStage: {
+    flex: 1,
+    minHeight: 0,
+    display: 'grid',
+    placeItems: 'center',
+    overflow: 'hidden',
+    border: `2px solid ${ink}`,
+    background: '#FFFFFF',
+  },
+  resultImage: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
     imageRendering: 'pixelated',
-    border: '3px solid #5D4037',
-    background: '#B3E5FC',
+  },
+  emptyText: {
+    fontFamily: '"Press Start 2P", ui-monospace, monospace',
+    fontSize: 12,
+    color: 'rgba(24,35,54,.45)',
   },
   tags: {
     display: 'flex',
     flexWrap: 'wrap',
-    justifyContent: 'center',
     gap: 6,
   },
   tag: {
-    fontSize: 7,
-    padding: '4px 6px',
-    border: '2px solid #42A5F5',
-    background: '#E3F2FD',
-    color: '#1565C0',
-    lineHeight: 1.5,
+    minHeight: 28,
+    padding: '4px 7px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    border: `2px solid ${ink}`,
+    background: '#FFFFFF',
+    boxShadow: `2px 2px 0 ${ink}`,
+    color: ink,
+    fontSize: 15,
+    lineHeight: 1.2,
   },
-  warningBox: {
+  notice: {
     display: 'flex',
     flexDirection: 'column',
     gap: 4,
-    maxWidth: 360,
+    padding: 8,
+    border: `2px solid ${ink}`,
+    background: '#FFF7D6',
   },
-  warning: {
+  noticeText: {
     margin: 0,
-    fontSize: 8,
-    lineHeight: 1.8,
-    color: '#8D5524',
+    fontSize: 16,
+    lineHeight: 1.3,
   },
   error: {
     margin: 0,
-    fontSize: 8,
-    lineHeight: 1.8,
-    color: '#C62828',
+    padding: 8,
+    border: `2px solid ${ink}`,
+    background: '#FFE4EF',
+    color: '#9F174D',
+    fontSize: 16,
+    lineHeight: 1.3,
   },
 };
