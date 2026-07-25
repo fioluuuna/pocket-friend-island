@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pocket Friend 四场景动态演示</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap");
+
+      :root {
+        --ink: #061627;
+        --paper: #d9f5ee;
+        --card: #f9fffb;
+        --mint: #b9f2dc;
+        --lime: #b7f64a;
+        --cyan: #45c9ff;
+        --pink: #ff4eaa;
+      }
+
+      * {
+        box-sizing: border-box;
+        letter-spacing: 0;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-width: 320px;
+        min-height: 100%;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: "VT323", ui-monospace, monospace;
+        font-size: 20px;
+      }
+
+      body {
+        background-image:
+          linear-gradient(rgb(6 22 39 / 0.06) 1px, transparent 1px),
+          linear-gradient(90deg, rgb(6 22 39 / 0.06) 1px, transparent 1px);
+        background-size: 16px 16px;
+      }
+
+      button {
+        cursor: pointer;
+        border: 2px solid var(--ink);
+        background: var(--card);
+        color: var(--ink);
+        font: inherit;
+        box-shadow: 3px 3px 0 var(--ink);
+      }
+
+      button:active {
+        transform: translate(2px, 2px);
+        box-shadow: 1px 1px 0 var(--ink);
+      }
+
+      .page {
+        width: min(100%, 1180px);
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 14px;
+      }
+
+      h1 {
+        margin: 0;
+        font-family: "Press Start 2P", ui-monospace, monospace;
+        font-size: clamp(13px, 2vw, 22px);
+        line-height: 1.7;
+      }
+
+      .subtitle {
+        margin-top: 8px;
+        color: rgb(6 22 39 / 0.68);
+        line-height: 1.3;
+      }
+
+      .stage-wrap {
+        border: 3px solid var(--ink);
+        background: var(--ink);
+        box-shadow: 6px 6px 0 var(--ink);
+        overflow: hidden;
+      }
+
+      .stage {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        min-height: 360px;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        image-rendering: pixelated;
+      }
+
+      .scene-label {
+        position: absolute;
+        left: 14px;
+        top: 14px;
+        border: 2px solid var(--ink);
+        background: var(--lime);
+        padding: 8px 10px;
+        box-shadow: 3px 3px 0 var(--ink);
+        font-family: "Press Start 2P", ui-monospace, monospace;
+        font-size: 10px;
+        line-height: 1.5;
+      }
+
+      .hint {
+        position: absolute;
+        right: 14px;
+        bottom: 14px;
+        border: 2px solid var(--ink);
+        background: var(--card);
+        padding: 7px 10px;
+        box-shadow: 3px 3px 0 var(--ink);
+        font-size: 18px;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .scene-button {
+        min-height: 54px;
+        padding: 8px;
+      }
+
+      .scene-button.active {
+        background: var(--pink);
+      }
+
+      .scene-button strong {
+        display: block;
+        font-family: "Press Start 2P", ui-monospace, monospace;
+        font-size: 8px;
+        line-height: 1.4;
+      }
+
+      .scene-button span {
+        display: block;
+        margin-top: 5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: rgb(6 22 39 / 0.66);
+      }
+
+      .record-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .record-row button {
+        min-height: 44px;
+        padding: 8px 12px;
+        background: var(--lime);
+        font-family: "Press Start 2P", ui-monospace, monospace;
+        font-size: 8px;
+      }
+
+      .note {
+        border: 2px solid var(--ink);
+        background: var(--mint);
+        padding: 8px 10px;
+        box-shadow: 3px 3px 0 var(--ink);
+        line-height: 1.25;
+      }
+
+      @media (max-width: 760px) {
+        .page {
+          padding: 12px;
+        }
+
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .stage {
+          aspect-ratio: 9 / 16;
+          min-height: 560px;
+        }
+
+        .controls {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <div class="topbar">
+        <div>
+          <h1>Pocket Friend 四场景动态演示</h1>
+          <div class="subtitle">给宣传录屏用：切换场景，小人在真实像素场景里移动，头顶保留真人照片识别 badge。</div>
+        </div>
+        <button id="fullscreenButton" type="button">FULLSCREEN</button>
+      </div>
+
+      <section class="stage-wrap">
+        <div class="stage" id="stage">
+          <canvas id="islandCanvas" aria-label="四场景动态演示"></canvas>
+          <div class="scene-label" id="sceneLabel">创业中心</div>
+          <div class="hint">点击小人会弹出名片气泡</div>
+        </div>
+      </section>
+
+      <div class="controls" id="sceneControls"></div>
+
+      <div class="record-row">
+        <div class="note">建议每个场景录 5-8 秒。宣传重点：像素小人在场景里动，头顶是真人照片 badge，用来解决现场脸盲识别。</div>
+        <button id="resetButton" type="button">RESET MOTION</button>
+      </div>
+    </main>
+
+    <script>
+      const scenes = [
+        {
+          id: "venture-center",
+          name: "湖畔创业中心",
+          shortName: "创业中心",
+          description: "项目共创、桌游和临时灵感碰撞",
+          src: "assets/scenes/venture-center.png",
+          walk: { x1: 0.18, x2: 0.88, y1: 0.48, y2: 0.86 },
+        },
+        {
+          id: "all-night-lab",
+          name: "通宵实验室",
+          shortName: "通宵实验室",
+          description: "调试、补 demo、安静并肩",
+          src: "assets/scenes/all-night-lab.png",
+          walk: { x1: 0.10, x2: 0.90, y1: 0.42, y2: 0.82 },
+        },
+        {
+          id: "pitch-stage",
+          name: "路演舞台",
+          shortName: "路演舞台",
+          description: "展示、鼓掌、互相记住作品",
+          src: "assets/scenes/pitch-stage.png",
+          walk: { x1: 0.16, x2: 0.86, y1: 0.52, y2: 0.90 },
+        },
+        {
+          id: "academic-center",
+          name: "杭州未来科技城学术交流中心",
+          shortName: "学术交流中心",
+          description: "正式相遇、会后聊天、深度交换",
+          src: "assets/scenes/academic-center.png",
+          walk: { x1: 0.12, x2: 0.88, y1: 0.42, y2: 0.88 },
+        },
+      ];
+
+      const pals = [
+        {
+          id: "pal-liu",
+          name: "刘",
+          hair: "#111827",
+          body: "#ff4eaa",
+          tags: ["Seedream", "硬件照片", "队友"],
+          bio: "真实照片识别完成，像素小人入岛。",
+          rx: 0.42,
+          ry: 0.68,
+        },
+        {
+          id: "pal-hdq",
+          name: "HDQ",
+          hair: "#38bdf8",
+          body: "#45c9ff",
+          tags: ["路演", "创意", "宣传"],
+          bio: "点击后可以看到名片提示。",
+          rx: 0.58,
+          ry: 0.60,
+        },
+        {
+          id: "pal-ga",
+          name: "伽",
+          hair: "#8b5cf6",
+          body: "#b7f64a",
+          tags: ["现场", "匹配", "岛屿"],
+          bio: "在不同场景里自动闲逛。",
+          rx: 0.33,
+          ry: 0.74,
+        },
+        {
+          id: "pal-tie",
+          name: "铁铁",
+          hair: "#f97316",
+          body: "#f472b6",
+          tags: ["朋友", "问卷", "磁场"],
+          bio: "头顶照片 badge 对应真人。",
+          rx: 0.69,
+          ry: 0.55,
+        },
+      ];
+
+      const dialogs = [
+        "先把主流程跑通！",
+        "这个岛终于动起来了。",
+        "点我可以看名片。",
+        "Demo day mode on.",
+        "刚从工位出来透气。",
+        "把灵感先贴上墙。",
+      ];
+
+      const canvas = document.getElementById("islandCanvas");
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      const stage = document.getElementById("stage");
+      const sceneLabel = document.getElementById("sceneLabel");
+      const controls = document.getElementById("sceneControls");
+      const resetButton = document.getElementById("resetButton");
+      const fullscreenButton = document.getElementById("fullscreenButton");
+
+      let activeSceneIndex = 0;
+      let sceneImage = new Image();
+      let dpr = window.devicePixelRatio || 1;
+      let rect = { x: 0, y: 0, w: 1, h: 1 };
+      let selectedId = pals[0].id;
+      let lastBubbleAt = 0;
+      let bubble = "";
+      let bubbleOwner = pals[0].id;
+      let sprites = [];
+
+      function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+      }
+
+      function easeOutBack(t) {
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+      }
+
+      function coverRect(canvasW, canvasH, imageW, imageH) {
+        const imageAspect = imageW / imageH;
+        const canvasAspect = canvasW / canvasH;
+        let w = canvasW;
+        let h = canvasH;
+        if (canvasAspect > imageAspect) h = canvasW / imageAspect;
+        else w = canvasH * imageAspect;
+        return { x: (canvasW - w) / 2, y: (canvasH - h) / 2, w, h };
+      }
+
+      function createBadgeImage(name, color) {
+        const badge = document.createElement("canvas");
+        badge.width = 96;
+        badge.height = 96;
+        const badgeCtx = badge.getContext("2d");
+        badgeCtx.fillStyle = "#ffffff";
+        badgeCtx.fillRect(0, 0, 96, 96);
+        badgeCtx.fillStyle = color;
+        badgeCtx.fillRect(14, 10, 68, 72);
+        badgeCtx.fillStyle = "#ffd7b5";
+        badgeCtx.fillRect(22, 24, 52, 46);
+        badgeCtx.fillStyle = "#061627";
+        badgeCtx.fillRect(30, 44, 8, 8);
+        badgeCtx.fillRect(58, 44, 8, 8);
+        badgeCtx.fillStyle = "#ff4eaa";
+        badgeCtx.fillRect(42, 62, 14, 4);
+        badgeCtx.fillStyle = "#061627";
+        badgeCtx.font = "12px monospace";
+        badgeCtx.textAlign = "center";
+        badgeCtx.fillText(name, 48, 90);
+        const image = new Image();
+        image.src = badge.toDataURL("image/png");
+        return image;
+      }
+
+      function createSpriteImage(pal) {
+        const sprite = document.createElement("canvas");
+        sprite.width = 96;
+        sprite.height = 128;
+        const spriteCtx = sprite.getContext("2d");
+        spriteCtx.imageSmoothingEnabled = false;
+        const px = (x, y, w, h, color) => {
+          spriteCtx.fillStyle = color;
+          spriteCtx.fillRect(x, y, w, h);
+        };
+        px(22, 10, 52, 18, "#061627");
+        px(18, 18, 60, 28, pal.hair);
+        px(24, 34, 48, 34, "#ffd7b5");
+        px(32, 48, 8, 8, "#061627");
+        px(56, 48, 8, 8, "#061627");
+        px(42, 62, 14, 4, "#f08aa8");
+        px(28, 70, 42, 32, pal.body);
+        px(18, 74, 12, 28, pal.body);
+        px(68, 74, 12, 28, pal.body);
+        px(30, 100, 14, 22, "#24324f");
+        px(54, 100, 14, 22, "#24324f");
+        px(26, 122, 20, 5, "#061627");
+        px(52, 122, 20, 5, "#061627");
+        const image = new Image();
+        image.src = sprite.toDataURL("image/png");
+        return image;
+      }
+
+      function resetSprites() {
+        const now = performance.now();
+        sprites = pals.map((pal, index) => ({
+          pal,
+          rx: pal.rx,
+          ry: pal.ry,
+          angle: -0.7 + index * 0.78,
+          speed: 0.00020 + index * 0.000035,
+          frame: 0,
+          clickScale: 1,
+          spawnAt: now + index * 180,
+          badgeImage: createBadgeImage(pal.name, pal.hair),
+          spriteImage: createSpriteImage(pal),
+        }));
+      }
+
+      function loadScene(index) {
+        activeSceneIndex = index;
+        const scene = scenes[activeSceneIndex];
+        sceneLabel.textContent = scene.name;
+        sceneImage = new Image();
+        sceneImage.onload = resize;
+        sceneImage.src = scene.src;
+        controls.querySelectorAll("button").forEach((button, buttonIndex) => {
+          button.classList.toggle("active", buttonIndex === activeSceneIndex);
+        });
+        resetSprites();
+      }
+
+      function resize() {
+        dpr = window.devicePixelRatio || 1;
+        const bounds = canvas.getBoundingClientRect();
+        canvas.width = Math.max(1, Math.floor(bounds.width * dpr));
+        canvas.height = Math.max(1, Math.floor(bounds.height * dpr));
+      }
+
+      function drawBackground() {
+        ctx.fillStyle = "#c8f3e7";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (sceneImage.complete && sceneImage.naturalWidth > 0) {
+          rect = coverRect(canvas.width, canvas.height, sceneImage.naturalWidth, sceneImage.naturalHeight);
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(sceneImage, rect.x, rect.y, rect.w, rect.h);
+        }
+      }
+
+      function isWalkable(rx, ry) {
+        const walk = scenes[activeSceneIndex].walk;
+        return rx >= walk.x1 && rx <= walk.x2 && ry >= walk.y1 && ry <= walk.y2;
+      }
+
+      function updateSprite(sprite, now) {
+        const settled = now - sprite.spawnAt > 900;
+        sprite.frame = Math.floor(now / 220) % 2;
+        if (sprite.clickScale > 1) sprite.clickScale += (1 - sprite.clickScale) * 0.18;
+        if (!settled) return;
+
+        const nx = sprite.rx + Math.cos(sprite.angle) * sprite.speed;
+        const ny = sprite.ry + Math.sin(sprite.angle) * sprite.speed * 0.68;
+        if (isWalkable(nx, ny)) {
+          sprite.rx = nx;
+          sprite.ry = ny;
+        } else {
+          sprite.angle += Math.PI * 0.68;
+        }
+        sprite.angle += Math.sin(now * 0.0005 + sprite.rx * 8) * 0.006;
+        sprite.rx = clamp(sprite.rx, 0.08, 0.92);
+        sprite.ry = clamp(sprite.ry, 0.18, 0.92);
+      }
+
+      function screenPos(sprite, now) {
+        const age = now - sprite.spawnAt;
+        const t = clamp(age / 900, 0, 1);
+        const arrival = easeOutBack(t);
+        const targetX = rect.x + sprite.rx * rect.w;
+        const targetY = rect.y + sprite.ry * rect.h;
+        const startX = rect.x + 0.5 * rect.w;
+        const startY = rect.y + 1.05 * rect.h;
+        const jump = Math.sin(t * Math.PI) * rect.h * 0.08;
+        return {
+          x: startX + (targetX - startX) * arrival,
+          y: startY + (targetY - startY) * arrival - jump,
+        };
+      }
+
+      function drawSprite(sprite, x, y, size, now) {
+        const bob = Math.sin(now * 0.008 + sprite.rx * 10) * (size / 20);
+        const width = size * 1.45 * sprite.clickScale;
+        const height = size * 2.05 * sprite.clickScale;
+        ctx.save();
+        ctx.translate(x, y + bob);
+        ctx.imageSmoothingEnabled = false;
+        ctx.fillStyle = "rgba(6,22,39,0.26)";
+        ctx.fillRect(-width * 0.34, -4 * dpr, width * 0.68, 5 * dpr);
+        ctx.drawImage(sprite.spriteImage, -width / 2, -height, width, height);
+        ctx.restore();
+      }
+
+      function drawBadge(sprite, x, y, size) {
+        const badge = 34 * dpr;
+        const badgeX = x - badge / 2;
+        const badgeY = y - size - badge - 22 * dpr;
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = "#061627";
+        ctx.lineWidth = 2 * dpr;
+        ctx.fillRect(badgeX, badgeY, badge, badge);
+        ctx.strokeRect(badgeX, badgeY, badge, badge);
+        ctx.drawImage(sprite.badgeImage, badgeX + 3 * dpr, badgeY + 3 * dpr, badge - 6 * dpr, badge - 6 * dpr);
+        ctx.restore();
+      }
+
+      function drawName(sprite, x, y, size) {
+        ctx.save();
+        ctx.font = `${Math.max(9, size * 0.17)}px "Press Start 2P", monospace`;
+        const width = ctx.measureText(sprite.pal.name).width;
+        const pad = 6 * dpr;
+        const boxH = 17 * dpr;
+        ctx.fillStyle = selectedId === sprite.pal.id ? "rgba(255,78,170,0.92)" : "rgba(6,22,39,0.78)";
+        ctx.fillRect(x - width / 2 - pad, y - size - boxH - 4 * dpr, width + pad * 2, boxH);
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.fillText(sprite.pal.name, x, y - size - 7 * dpr);
+        ctx.restore();
+      }
+
+      function drawBubble(owner, now) {
+        if (!bubble || now - lastBubbleAt > 2400) return;
+        const pos = screenPos(owner, now);
+        const alpha = 1 - clamp((now - lastBubbleAt - 1600) / 800, 0, 1);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.font = `${16 * dpr}px "VT323", monospace`;
+        const width = Math.min(ctx.measureText(bubble).width + 20 * dpr, rect.w * 0.70);
+        const height = 30 * dpr;
+        const x = clamp(pos.x - width / 2, 8 * dpr, canvas.width - width - 8 * dpr);
+        const y = clamp(pos.y - 92 * dpr, 10 * dpr, canvas.height - height - 10 * dpr);
+        ctx.fillStyle = "rgba(255,255,255,0.94)";
+        ctx.strokeStyle = "#061627";
+        ctx.lineWidth = 2 * dpr;
+        ctx.fillRect(x, y, width, height);
+        ctx.strokeRect(x, y, width, height);
+        ctx.fillStyle = "#061627";
+        ctx.fillText(bubble, x + 10 * dpr, y + 21 * dpr);
+        ctx.restore();
+      }
+
+      function loop(now) {
+        drawBackground();
+
+        if (now - lastBubbleAt > 3200 && sprites.length > 0) {
+          const index = Math.floor((now / 3200) % sprites.length);
+          bubbleOwner = sprites[index].pal.id;
+          bubble = dialogs[index % dialogs.length];
+          lastBubbleAt = now;
+        }
+
+        sprites.forEach((sprite) => updateSprite(sprite, now));
+        const sorted = [...sprites].sort((a, b) => a.ry - b.ry);
+        for (const sprite of sorted) {
+          const pos = screenPos(sprite, now);
+          const size = rect.h * 0.085;
+          drawSprite(sprite, pos.x, pos.y, size, now);
+          drawName(sprite, pos.x, pos.y, size);
+          drawBadge(sprite, pos.x, pos.y, size);
+        }
+
+        const owner = sprites.find((sprite) => sprite.pal.id === bubbleOwner);
+        if (owner) drawBubble(owner, now);
+
+        requestAnimationFrame(loop);
+      }
+
+      function handleClick(event) {
+        const bounds = canvas.getBoundingClientRect();
+        const mx = (event.clientX - bounds.left) * dpr;
+        const my = (event.clientY - bounds.top) * dpr;
+        const now = performance.now();
+        for (let index = sprites.length - 1; index >= 0; index -= 1) {
+          const sprite = sprites[index];
+          const pos = screenPos(sprite, now);
+          const size = rect.h * 0.085;
+          if (Math.hypot(mx - pos.x, my - (pos.y - size * 0.5)) < size * 1.05) {
+            sprite.clickScale = 1.28;
+            selectedId = sprite.pal.id;
+            bubble = `${sprite.pal.name}: ${sprite.pal.bio}`;
+            bubbleOwner = sprite.pal.id;
+            lastBubbleAt = now;
+            return;
+          }
+        }
+      }
+
+      scenes.forEach((scene, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "scene-button";
+        button.innerHTML = `<strong>${scene.shortName}</strong><span>${scene.description}</span>`;
+        button.addEventListener("click", () => loadScene(index));
+        controls.appendChild(button);
+      });
+
+      canvas.addEventListener("click", handleClick);
+      resetButton.addEventListener("click", resetSprites);
+      fullscreenButton.addEventListener("click", () => {
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          stage.requestFullscreen();
+        }
+      });
+      window.addEventListener("resize", resize);
+
+      resize();
+      loadScene(0);
+      requestAnimationFrame(loop);
+    </script>
+  </body>
+</html>

@@ -6,7 +6,21 @@
 
 ## 1. 先说结论
 
-四个场景不是单独的视频文件，也不是 GIF。现在项目里的实现方式是：
+如果只想要“能动的四场景前端演示”，直接看这个文件：
+
+```text
+apps/mobile/public/scene-publicity-demo.html
+```
+
+本地启动前端后访问：
+
+```text
+http://127.0.0.1:5175/scene-publicity-demo.html
+```
+
+这个页面已经把四个场景、动态小人、真人照片 badge、点击气泡、全屏录制按钮都单独抽出来了，不需要走登录/问卷/硬件照片流程。
+
+四个场景不是单独的视频文件，也不是 GIF。现在项目里的正式实现方式是：
 
 ```text
 场景背景 PNG
@@ -178,6 +192,12 @@ https://github.com/fioluuuna/pocket-friend-island/tree/feature/encounter-profile
 
 ```text
 https://github.com/fioluuuna/pocket-friend-island/blob/feature/encounter-profile-arrival-flow/apps/mobile/src/components/InteractiveIsland.tsx
+```
+
+独立动态演示页：
+
+```text
+https://github.com/fioluuuna/pocket-friend-island/blob/feature/encounter-profile-arrival-flow/apps/mobile/public/scene-publicity-demo.html
 ```
 
 PALS 页面：
