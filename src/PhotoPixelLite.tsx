@@ -68,8 +68,9 @@ export function PhotoPixelLite(): React.JSX.Element {
   }
 
   return (
-    <main style={styles.page}>
-      <section style={styles.hero}>
+    <main className="photo-lite-page" style={styles.page}>
+      <style>{photoLiteResponsiveCss}</style>
+      <section className="photo-lite-hero" style={styles.hero}>
         <div>
           <p style={styles.kicker}>POCKET FRIEND LITE</p>
           <h1 style={styles.title}>拍照生成像素小人</h1>
@@ -78,7 +79,7 @@ export function PhotoPixelLite(): React.JSX.Element {
         <div style={styles.status}>{status}</div>
       </section>
 
-      <section style={styles.captureCard}>
+      <section className="photo-lite-capture" style={styles.captureCard}>
         <input
           ref={inputRef}
           type="file"
@@ -99,7 +100,7 @@ export function PhotoPixelLite(): React.JSX.Element {
         <p style={styles.helpText}>手机扫码后点按钮，允许相机或从相册选照片即可。</p>
       </section>
 
-      <section style={styles.grid}>
+      <section className="photo-lite-grid" style={styles.grid}>
         <ResultPanel title="原照片" label="REF" imageUrl={result.refUrl} empty="等待拍照" />
         <ResultPanel title="抽象土豆版" label="POTATO" imageUrl={result.potatoUrl} empty={stage === 'local' ? '生成中' : '等待照片'} />
         <ResultPanel title="豆包像素小人" label="SEEDREAM" imageUrl={result.seedreamUrl} empty={stage === 'seedream' ? '约 30-60 秒' : '等待生成'} />
@@ -124,12 +125,12 @@ function ResultPanel({
   empty: string;
 }): React.JSX.Element {
   return (
-    <article style={styles.panel}>
+    <article className="photo-lite-panel" style={styles.panel}>
       <div style={styles.panelHeader}>
         <span style={styles.panelLabel}>{label}</span>
         <span style={styles.panelTitle}>{title}</span>
       </div>
-      <div style={styles.imageStage}>
+      <div className="photo-lite-image-stage" style={styles.imageStage}>
         {imageUrl ? (
           <img src={imageUrl} alt={title} style={styles.image} />
         ) : (
@@ -320,6 +321,70 @@ const lime = '#a7f018';
 const pink = '#f04aa5';
 const mint = '#d5f5e8';
 const card = '#f8fff7';
+
+const photoLiteResponsiveCss = `
+  .photo-lite-page {
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+
+  .photo-lite-page * {
+    box-sizing: border-box;
+  }
+
+  @media (max-width: 720px) {
+    .photo-lite-page {
+      min-height: 100svh !important;
+      padding: 12px 10px 24px !important;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .photo-lite-hero {
+      flex-direction: column !important;
+      gap: 10px !important;
+      margin-bottom: 10px !important;
+    }
+
+    .photo-lite-hero h1 {
+      font-size: 30px !important;
+      line-height: 1.04 !important;
+    }
+
+    .photo-lite-hero p {
+      font-size: 13px !important;
+      line-height: 1.45 !important;
+    }
+
+    .photo-lite-capture {
+      position: sticky;
+      top: 8px;
+      z-index: 2;
+      margin-bottom: 12px !important;
+      box-shadow: 3px 3px 0 ${ink} !important;
+    }
+
+    .photo-lite-grid {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 14px !important;
+      scroll-snap-type: y proximity;
+    }
+
+    .photo-lite-panel {
+      width: 100% !important;
+      min-height: 74svh !important;
+      padding: 10px !important;
+      scroll-snap-align: start;
+      box-shadow: 4px 4px 0 ${ink} !important;
+    }
+
+    .photo-lite-image-stage {
+      min-height: calc(74svh - 64px) !important;
+      aspect-ratio: 1 / 1;
+    }
+  }
+`;
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
