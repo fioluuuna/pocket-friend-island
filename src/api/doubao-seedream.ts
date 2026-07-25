@@ -1,4 +1,3 @@
-const DOUBAO_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/images/generations';
 const DEFAULT_DOUBAO_MODEL = 'doubao-seedream-5-0-260128';
 
 export const SEEDREAM_MAPLESTORY_PROMPT =
@@ -22,29 +21,14 @@ export interface SeedreamGenerationResult {
 }
 
 export async function generateSeedreamPixelAvatar(file: File): Promise<SeedreamGenerationResult> {
-  const apiKey = import.meta.env.VITE_DOUBAO_API_KEY as string | undefined;
-  const model = (import.meta.env.VITE_DOUBAO_MODEL as string | undefined) ?? DEFAULT_DOUBAO_MODEL;
-
-  if (!apiKey) {
-    throw new Error('Missing VITE_DOUBAO_API_KEY. Please check the project root .env file.');
-  }
-
   const compressedReferenceDataUrl = await compressImageToDataUrl(file, 1024);
-  const response = await fetch(DOUBAO_ENDPOINT, {
+  const response = await fetch('/api/seedream-lite', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model,
-      prompt: SEEDREAM_MAPLESTORY_PROMPT,
       image: compressedReferenceDataUrl,
-      sequential_image_generation: 'disabled',
-      size: '2K',
-      response_format: 'url',
-      stream: false,
-      watermark: false,
     }),
   });
 
@@ -53,28 +37,28 @@ export async function generateSeedreamPixelAvatar(file: File): Promise<SeedreamG
   if (!response.ok) {
     if (payload?.error?.code === 'ModelNotOpen') {
       throw new Error(
-        `API Key is valid, but model ${model} is not activated for this account. Activate the model or set VITE_DOUBAO_MODEL to your Ark endpoint ID.`,
+        `API Key is valid, but model is not activated for this account. Activate the model or set DOUBAO_MODEL on the server.`,
       );
     }
 
     if (payload?.error?.code === 'InvalidEndpointOrModel.NotFound') {
       throw new Error(
-        `Ark cannot find model/endpoint ${model}. Set VITE_DOUBAO_MODEL to the exact model ID or endpoint ID shown in the Ark console.`,
+        `Ark cannot find model/endpoint. Set DOUBAO_MODEL to the exact model ID or endpoint ID shown in the Ark console.`,
       );
     }
 
-    throw new Error(payload?.error?.message ?? `Seedream generation failed with ${model}: HTTP ${response.status}`);
+    throw new Error(payload?.error?.message ?? `Seedream generation failed: HTTP ${response.status}`);
   }
 
-  const imageUrl = payload?.data?.[0]?.url ?? payload?.data?.[0]?.b64_json;
+  const imageUrl = payload?.data?.[0]?.url ?? payload?.data?.[0]?.b64_json ?? (payload as { imageUrl?: string } | null)?.imageUrl;
   if (!imageUrl) {
-    throw new Error(`Seedream returned no image URL for model ${model}.`);
+    throw new Error('Seedream returned no image URL.');
   }
 
   return {
     imageUrl: imageUrl.startsWith('http') ? imageUrl : `data:image/png;base64,${imageUrl}`,
     compressedReferenceDataUrl,
-    model,
+    model: (payload as { model?: string } | null)?.model ?? DEFAULT_DOUBAO_MODEL,
   };
 }
 

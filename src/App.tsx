@@ -20,6 +20,7 @@ import {
   COLLABORATION_STYLE_LABELS,
 } from './types';
 import { TestAvatar } from './TestAvatar';
+import { PhotoPixelLite } from './PhotoPixelLite';
 
 /** 应用视图类型 */
 type AppView = 'island' | 'matching' | 'profile' | 'avatar';
@@ -35,6 +36,10 @@ interface RadarDevice extends ProximityEvent {
  * @returns 应用根 JSX
  */
 export function App(): React.JSX.Element {
+  if (window.location.pathname === '/photo-pixel-lite') {
+    return <PhotoPixelLite />;
+  }
+
   /** 当前视图 */
   const [currentView, setCurrentView] = useState<AppView>('island');
   /** 附近检测到的设备（雷达显示用） */
